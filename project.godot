@@ -1,0 +1,43 @@
+; Engine configuration file.
+; Target engine: Godot 4.7.2 stable (GDScript only, no plugins).
+
+config_version=5
+
+[application]
+
+config/name="GOD HUNT"
+config/description="100 soldiers. 3 minutes to gear up. Then a god falls from the sky."
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/window_width_override=1280
+window/size/window_height_override=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[layer_names]
+
+3d_physics/layer_1="World"
+3d_physics/layer_2="Player"
+3d_physics/layer_3="Soldiers"
+3d_physics/layer_4="Boss"
+3d_physics/layer_5="Pickups"
+3d_physics/layer_6="Vehicles"
+3d_physics/layer_7="Debris"
+
+[physics]
+
+common/physics_ticks_per_second=60
+3d/default_gravity=24.0
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true
+environment/defaults/default_clear_color=Color(0.55, 0.7, 0.85, 1)
+anti_aliasing/quality/msaa_3d=1
