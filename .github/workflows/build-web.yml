@@ -1,0 +1,209 @@
+# Builds GOD HUNT for the Web with Godot 4.7.2 (headless, no editor window).
+#
+# Order of checks (the build stops at the first failure and reports the
+# exact file, line and error in the run summary):
+#   1. restore folder layout (in case files were uploaded flat)
+#   2. install Godot 4.7.2 + export templates
+#   3. import the project
+#   4. load/compile every script, shader and scene (tools/ci_verify.gd)
+#   5. run the main scene for a few seconds
+#   6. export the Web build
+#   7. upload the build as a downloadable ZIP (Actions run -> Artifacts)
+
+name: Build GOD HUNT (Web)
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: "4.7.2"
+  GODOT_STATUS: "stable"
+
+jobs:
+  web:
+    name: Verify and export Web build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Restore folder layout if files were uploaded flat
+        shell: bash
+        run: |
+          # A loose copy at the root is moved into its folder; if the folder copy
+          # already exists, the folder copy wins and the loose duplicate is removed.
+          move() {
+            [ -f "$1" ] || return 0
+            if [ -f "$2/$1" ]; then rm -f "$1"; echo "removed duplicate $1 (kept $2/$1)"
+            else mkdir -p "$2" && mv -f "$1" "$2/$1" && echo "moved $1 -> $2/"; fi
+          }
+          for f in game.gd city.gd player.gd weapons.gd loot.gd jeep.gd soldier.gd thor.gd hud.gd fx.gd sounds.gd; do move "$f" scripts; done
+          move ci_verify.gd tools
+          # Stale editor caches from another machine can confuse the import.
+          rm -rf .godot
+          find . -name "*.import" -not -path "./.git/*" -delete
+          test -f project.godot || { echo "::error::project.godot not found at the repository root"; exit 1; }
+
+      - name: Cache Godot and export templates
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot-bin
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-${{ env.GODOT_STATUS }}-v1
+
+      - name: Install Godot ${{ env.GODOT_VERSION }} and export templates
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GODOT_VERSION}-${GODOT_STATUS}"
+          fetch() {
+            curl -fsSL --retry 3 -o "$2" "https://github.com/godotengine/godot/releases/download/${TAG}/$1" \
+            || curl -fsSL --retry 3 -o "$2" "https://github.com/godotengine/godot-builds/releases/download/${TAG}/$1" \
+            || { echo "::error::Could not download $1 for Godot ${TAG}"; exit 1; }
+          }
+          fetch "Godot_v${TAG}_linux.x86_64.zip" godot.zip
+          fetch "Godot_v${TAG}_export_templates.tpz" templates.tpz
+          mkdir -p ~/godot-bin
+          unzip -q godot.zip -d ~/godot-bin
+          mv ~/godot-bin/Godot_v${TAG}_linux.x86_64 ~/godot-bin/godot
+          chmod +x ~/godot-bin/godot
+          TDIR=~/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}
+          mkdir -p "$TDIR" /tmp/tpl
+          unzip -q templates.tpz -d /tmp/tpl
+          mv /tmp/tpl/templates/* "$TDIR/"
+          rm -f godot.zip templates.tpz
+          ls "$TDIR" | grep -q '^web_nothreads_release.zip$' \
+            || { echo "::error::Web (no-threads) export template missing from the template package"; exit 1; }
+
+      - name: Show Godot version
+        shell: bash
+        run: |
+          echo "$HOME/godot-bin" >> "$GITHUB_PATH"
+          ~/godot-bin/godot --headless --version
+
+      - name: Import project
+        shell: bash
+        run: |
+          mkdir -p logs
+          set +e
+          timeout 900 godot --headless --path . --import 2>&1 | tee logs/1-import.log
+          echo "exit code: ${PIPESTATUS[0]}" >> logs/1-import.log
+          exit 0
+
+      - name: Compile all scripts and load all scenes
+        id: verify
+        shell: bash
+        run: |
+          set +e
+          timeout 300 godot --headless --path . --script res://tools/ci_verify.gd 2>&1 | tee logs/2-verify.log
+          echo "code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run main scene for a few seconds
+        id: smoke
+        shell: bash
+        run: |
+          set +e
+          timeout 120 godot --headless --path . --quit-after 300 2>&1 | tee logs/3-run.log
+          echo "code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Render test frames with real OpenGL (catches shader errors, saves a screenshot)
+        id: render
+        shell: bash
+        run: |
+          set +e
+          if ! command -v xvfb-run >/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libgl1-mesa-dri
+          fi
+          mkdir -p screenshots
+          LIBGL_ALWAYS_SOFTWARE=1 timeout 600 xvfb-run -a -s "-screen 0 1280x720x24" \
+            godot --path . --rendering-driver opengl3 --resolution 1280x720 \
+            --write-movie screenshots/frame.png --quit-after 240 2>&1 | tee logs/3b-render.log
+          echo "code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          # keep only the last frame
+          ls screenshots/*.png 2>/dev/null | sort | head -n -1 | xargs -r rm -f
+          ls -la screenshots
+          exit 0
+
+      - name: Report errors (stop here if any)
+        shell: bash
+        run: |
+          FATAL='SCRIPT ERROR|SHADER ERROR|Parse Error|CI_FAIL|Failed loading resource|Failed to load (script|resource)|Cannot open file|Unable to (open|load)|Can.t load|Invalid (call|get|set|access)|Shader compilation failed'
+          {
+            echo "## GOD HUNT build check"
+            echo "Godot ${GODOT_VERSION}-${GODOT_STATUS}"
+            echo "- verify script exit code: ${{ steps.verify.outputs.code }}"
+            echo "- main scene run exit code: ${{ steps.smoke.outputs.code }}"
+            echo "- OpenGL render test exit code: ${{ steps.render.outputs.code }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Point at file:line for every res:// location mentioned near an error.
+          grep -hoE 'res://[^ ()]+\.(gd|tscn|gdshader|tres):[0-9]+' logs/*.log | sort -u | while IFS=: read -r _ path line; do
+            file="${path#//}"; echo "::error file=${file},line=${line}::Godot reported an error here (details in the run summary)"
+          done || true
+
+          if grep -nE "$FATAL" logs/*.log > fatal.txt || [ "${{ steps.verify.outputs.code }}" != "0" ]; then
+            echo "### ❌ Errors found — no build was exported" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            grep -nE -A3 "$FATAL" logs/*.log >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat fatal.txt
+            echo "::error::Project has errors (see the run summary for exact file, line and message). Export skipped."
+            exit 1
+          fi
+
+          if grep -nE '^(ERROR|WARNING):' logs/*.log > other.txt; then
+            echo "### ⚠️ Other engine messages (not blocking)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"; head -n 60 other.txt >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "### ✅ Import, compile and run checks passed" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Export Web build
+        shell: bash
+        run: |
+          set +e
+          mkdir -p build/web
+          timeout 900 godot --headless --path . --export-release "Web" build/web/index.html 2>&1 | tee logs/4-export.log
+          set -e
+          for f in index.html index.js index.wasm index.pck; do
+            test -s "build/web/$f" || { echo "::error::Export did not produce build/web/$f (see logs/4-export.log)"; exit 1; }
+          done
+          ls -la build/web
+          echo "### 📦 Web build exported" >> "$GITHUB_STEP_SUMMARY"
+          echo "Download **GODHUNT-web** from the Artifacts section below, then upload that ZIP to itch.io as an HTML game." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Web build (ZIP)
+        uses: actions/upload-artifact@v4
+        with:
+          name: GODHUNT-web
+          path: build/web/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot
+          path: screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 14
