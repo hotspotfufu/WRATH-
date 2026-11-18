@@ -1,12 +1,12 @@
 extends Node3D
 ## Runs a match of GOD HUNT:
-##   1. LOOT (2:30) - 100 soldiers drop into the city and grab weapons, armor, jeeps
+##   1. LOOT (2:00) - 100 soldiers drop into the city and grab weapons, armor, jeeps
 ##   2. STORM - the sky darkens, thunder rolls
 ##   3. BOSS - Thor crashes down and tries to wipe everyone out
 ##   4. Kill Thor -> his hammer drops. Pick it up to claim Mjolnir.
 
 const CityScript := preload("res://scripts/city.gd")
-const LOOT_TIME := 150.0
+const LOOT_TIME := 120.0
 const SOLDIERS := 99            # plus you = 100
 const MAX_JEEPS := 10
 
@@ -88,16 +88,16 @@ func _spawn_loot() -> void:
 	var pts: Array[Vector3] = city.get("loot_points")
 	pts.shuffle()
 	var scene: Script = load("res://scripts/loot.gd")
-	var count := mini(pts.size(), 420)
+	var count := mini(pts.size(), 480)
 	for i in count:
 		var l: Area3D = scene.new()
 		var r := _rng.randf()
-		if r < 0.72:
+		if r < 0.6:
 			l.set("kind", "weapon")
 			l.set("id", Weapons.LOOT_TABLE[_rng.randi() % Weapons.LOOT_TABLE.size()])
-		elif r < 0.82:
+		elif r < 0.68:
 			l.set("kind", "ammo")
-		elif r < 0.91:
+		elif r < 0.82:
 			l.set("kind", "armor")
 		else:
 			l.set("kind", "health")
@@ -164,7 +164,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		phase = "loot"
 		hud.set("start_screen", false)
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-		hud.call("banner", "GEAR UP!", "Thor arrives in 2:30 - find weapons, armor and a jeep", 4.0)
+		hud.call("banner", "GEAR UP!", "Thor arrives in 2:00 - armor and health do NOT regenerate, grab health packs!", 4.0)
 		get_viewport().set_input_as_handled()
 	elif phase in ["won_end", "lost"] and _spectate_t > 1.5:
 		if (event is InputEventKey and (event as InputEventKey).keycode == KEY_ENTER) or (event is InputEventMouseButton and (event as InputEventMouseButton).pressed) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).pressed):

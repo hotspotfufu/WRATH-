@@ -15,10 +15,10 @@ enum S { FALL, ROAR, IDLE, WALK, THROW, LEAP, SMASH, LIGHTNING, STOMP, DEAD }
 ## Thor has 3 health bars. Each bar is a full god's worth of health:
 ## bar 3 = blue, bar 2 = purple, bar 1 = gold. Breaking a bar makes him stronger.
 const BARS := 3
-const BAR_HP := 20000.0
+const BAR_HP := 8000.0
 var max_hp := BAR_HP * BARS
 var hp := BAR_HP * BARS
-var damage_taken := 0.4           ## Thor only takes 40% of incoming damage
+var damage_taken := 0.35          ## Thor only takes 35% of incoming damage
 var _phase_shield := 0.0          ## brief invulnerability when a bar breaks
 var dead := false
 var city: Node = null
@@ -26,7 +26,8 @@ var city: Node = null
 var _s := S.FALL
 var _t := 0.0
 var _target: Node3D = null
-var _cd := {"throw": 2.0, "smash": 6.0, "lightning": 5.0, "stomp": 0.0, "leap": 8.0}
+var _cd := {"throw": 1.0, "smash": 3.0, "lightning": 2.0, "stomp": 0.0, "leap": 6.0}
+var _storm_t := 2.0              ## the storm around Thor drops lightning on its own
 var _hammer_out := false
 var _enraged := false
 var _rage_level := 0             ## 0, 1, 2: rises with each broken health bar
@@ -173,6 +174,11 @@ func _physics_process(delta: float) -> void:
 	for k in _cd:
 		_cd[k] -= delta * (1.0 + 0.45 * _rage_level)
 	_phase_shield = maxf(0.0, _phase_shield - delta)
+	if _s != S.FALL and _s != S.DEAD:
+		_storm_t -= delta * (1.0 + 0.6 * _rage_level)
+		if _storm_t <= 0.0:
+			_storm_t = randf_range(0.8, 1.4)
+			_storm_bolt()
 	_flash = maxf(0.0, _flash - delta * 5.0)
 	match _s:
 		S.FALL:
@@ -189,7 +195,7 @@ func _physics_process(delta: float) -> void:
 			velocity.x = 0
 			velocity.z = 0
 			_gravity(delta)
-			if _t > maxf(0.15, 0.6 - 0.2 * _rage_level):
+			if _t > maxf(0.1, 0.3 - 0.1 * _rage_level):
 				_choose()
 		S.WALK:
 			_walk_toward(delta)
@@ -262,21 +268,55 @@ func _choose() -> void:
 	var tp := _target.global_position
 	var dist := Vector2(tp.x - global_position.x, tp.z - global_position.z).length()
 	_face(tp)
-	var near := _count_near(8.0)
+	var near := _count_near(9.0)
+	var hideout := _busiest_building(80.0)
 	if near >= 2 and _cd["stomp"] <= 0.0:
 		_go(S.STOMP)
-	elif city and _cd["smash"] <= 0.0 and city.call("building_at", tp, 1.5) >= 0 and dist < 70.0:
-		_smash_index = city.call("building_at", tp, 1.5)
+	elif city and _cd["smash"] <= 0.0 and hideout >= 0:
+		_smash_index = hideout                      # soldiers hiding inside? bring it down
 		_go(S.SMASH)
-	elif dist > 70.0 and _cd["leap"] <= 0.0:
+	elif not _hammer_out and _cd["throw"] <= 0.0 and dist < 90.0:
+		_go(S.THROW)
+	elif _cd["lightning"] <= 0.0 and dist < 80.0:
+		_go(S.LIGHTNING)
+	elif dist > 60.0 and _cd["leap"] <= 0.0:
 		_leap_to = tp + Vector3(randf_range(-6, 6), 0, randf_range(-6, 6))
 		_go(S.LEAP)
-	elif _cd["lightning"] <= 0.0 and dist < 60.0:
-		_go(S.LIGHTNING)
-	elif not _hammer_out and _cd["throw"] <= 0.0 and dist > 6.0 and dist < 80.0:
-		_go(S.THROW)
 	else:
 		_go(S.WALK)
+
+
+## the building (within range) with the most fighters in or on it
+func _busiest_building(max_dist: float) -> int:
+	if city == null:
+		return -1
+	var counts := {}
+	for f in get_tree().get_nodes_in_group("fighters"):
+		var fp := (f as Node3D).global_position
+		if fp.distance_to(global_position) > max_dist:
+			continue
+		var i: int = city.call("building_at", fp, 1.0)
+		if i >= 0:
+			counts[i] = counts.get(i, 0) + (3 if f.is_in_group("player") else 1)
+	var best := -1
+	var bc := 0
+	for i in counts:
+		if counts[i] > bc:
+			bc = counts[i]
+			best = i
+	return best
+
+
+## a random bolt from the storm, aimed at someone near Thor (with a warning circle)
+func _storm_bolt() -> void:
+	var fighters := get_tree().get_nodes_in_group("fighters")
+	if fighters.is_empty():
+		return
+	for k in 4:
+		var f: Node3D = fighters[randi() % fighters.size()]
+		if f.global_position.distance_to(global_position) < 110.0:
+			_add_strike(f.global_position + Vector3(randf_range(-2, 2), 0, randf_range(-2, 2)))
+			return
 
 
 func _face(p: Vector3) -> void:
@@ -343,7 +383,7 @@ func _do_throw(_delta: float) -> void:
 	if not _did:
 		_did = true
 		_pose(0.0, -0.3, -1.4, 0.15)
-		_cd["throw"] = 3.0
+		_cd["throw"] = 1.4
 		var lead := Vector3.ZERO
 		if _target is CharacterBody3D:
 			lead = (_target as CharacterBody3D).velocity * 0.4
@@ -353,48 +393,76 @@ func _do_throw(_delta: float) -> void:
 		_go(S.IDLE)
 
 
+## Mjolnir flies at the target, explodes, then ricochets to more targets
+## (smashing every building it slams into) before flying back to Thor's hand.
 func _throw_hammer(at: Vector3) -> void:
 	_hammer_out = true
 	_hammer_hand.visible = false
-	var start := _hammer_hand.global_position
 	var model := Node3D.new()
 	get_parent().add_child(model)
-	model.global_position = start
+	model.global_position = _hammer_hand.global_position
 	_build_hammer(model, H / 7.0)
 	var glow := OmniLight3D.new()
 	glow.light_color = Color(0.6, 0.8, 1.0)
-	glow.light_energy = 3.0
-	glow.omni_range = 10.0
+	glow.light_energy = 4.0
+	glow.omni_range = 14.0
 	model.add_child(glow)
-	# stop at the first wall in the way, and smash that building
-	var hit := get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(start, at + (at - start).normalized() * 3.0, 1 | 32))
-	var end := at
-	var smash_i := -1
-	if not hit.is_empty():
-		end = hit["position"]
-		if city:
-			smash_i = city.call("building_at", end, 1.0)
-	var t := start.distance_to(end) / 55.0
-	var on_hit := func():
-		_boom(end, 5.0, 85.0)
+	_hammer_flight(model, at, 2 + _rage_level)
+
+
+func _hammer_flight(model: Node3D, first: Vector3, bounces: int) -> void:
+	var space := get_world_3d().direct_space_state
+	var target := first
+	var visited: Array = []
+	for hop in bounces + 1:
+		var start := model.global_position
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(start, target + (target - start).normalized() * 3.0, 1 | 32))
+		var end := target
+		var smash_i := -1
+		if not hit.is_empty():
+			end = hit["position"]
+			if city:
+				smash_i = city.call("building_at", end, 1.0)
+		var t := 0.0
+		var dur := maxf(0.15, start.distance_to(end) / 60.0)
+		while t < dur:
+			await get_tree().process_frame
+			if not is_instance_valid(model):
+				return
+			t += get_process_delta_time()
+			model.global_position = start.lerp(end, minf(1.0, t / dur))
+			model.rotation.x -= 0.5
+		_boom(end, 7.0, 120.0, true)
+		FX.lightning(get_parent(), end + Vector3(randf_range(-3, 3), 45, randf_range(-3, 3)), end)
 		if smash_i >= 0:
 			city.call("smash", smash_i, end, self)
-	var fly_back := func(k: float):
-		if is_instance_valid(self) and is_instance_valid(model):
-			model.global_position = end.lerp(_hammer_hand.global_position, k)
-			model.rotation.x += 0.4
-	var caught := func():
-		model.queue_free()
-		if is_instance_valid(self):
-			_hammer_out = false
-			_hammer_hand.visible = not dead
-	var tw := model.create_tween()
-	tw.tween_property(model, "global_position", end, t)
-	tw.parallel().tween_property(model, "rotation:x", -TAU * 4.0 * t, t)
-	tw.tween_callback(on_hit)
-	tw.tween_interval(0.25)
-	tw.tween_method(fly_back, 0.0, 1.0, maxf(0.5, t))
-	tw.tween_callback(caught)
+		# pick the next victim close to where it landed
+		var next: Node3D = null
+		var bd := 45.0
+		for f in get_tree().get_nodes_in_group("fighters"):
+			var d := (f as Node3D).global_position.distance_to(end)
+			if d > 4.0 and d < bd and not (f in visited):
+				bd = d
+				next = f
+		if next == null:
+			break
+		visited.append(next)
+		target = next.global_position + Vector3(0, 0.8, 0)
+	# fly home
+	var from := model.global_position
+	var k := 0.0
+	while k < 1.0:
+		await get_tree().process_frame
+		if not is_instance_valid(model):
+			return
+		k += get_process_delta_time() / 0.7
+		if is_instance_valid(self) and not dead:
+			model.global_position = from.lerp(_hammer_hand.global_position, minf(1.0, k))
+		model.rotation.x += 0.4
+	model.queue_free()
+	if is_instance_valid(self):
+		_hammer_out = false
+		_hammer_hand.visible = not dead
 
 
 func _do_leap(delta: float) -> void:
@@ -408,7 +476,7 @@ func _do_leap(delta: float) -> void:
 	global_position = p
 	_pose(0.6, -2.8, -2.8, -0.2)
 	if k >= 1.0:
-		_cd["leap"] = 10.0
+		_cd["leap"] = 7.0
 		_shockwave(global_position, 12.0, 70.0)
 		_go(S.IDLE)
 		_gravity(delta)
@@ -441,7 +509,7 @@ func _do_smash(_delta: float) -> void:
 		_pose(0.0, -0.4, -0.2, 0.5)
 		city.call("smash", _smash_index, global_position, self)
 		_shockwave(global_position, 10.0, 60.0)
-		_cd["smash"] = 9.0
+		_cd["smash"] = 4.0
 	if _t > 1.9:
 		_go(S.IDLE)
 
@@ -451,17 +519,17 @@ func _do_lightning(_delta: float) -> void:
 	_pose(0.0, -0.2, -3.0, -0.1)           # hammer to the sky
 	if not _did:
 		_did = true
-		_cd["lightning"] = 7.0
+		_cd["lightning"] = 3.5
 		_voice.stream = Sounds.thunder()
 		_voice.play()
 		var fighters := get_tree().get_nodes_in_group("fighters")
 		fighters.shuffle()
-		var n := 3 + 2 * _rage_level
+		var n := 7 + 4 * _rage_level
 		for f in fighters:
 			if n <= 0:
 				break
 			var fp := (f as Node3D).global_position
-			if fp.distance_to(global_position) < 70.0:
+			if fp.distance_to(global_position) < 95.0:
 				_add_strike(fp)
 				n -= 1
 	if _t > 1.4:
@@ -476,8 +544,8 @@ func _do_stomp(_delta: float) -> void:
 	if not _did:
 		_did = true
 		_pose(0.0, 0.3, 0.3, 0.2)
-		_cd["stomp"] = 4.0
-		_shockwave(global_position, 11.0, 45.0)
+		_cd["stomp"] = 3.0
+		_shockwave(global_position, 13.0, 65.0)
 	if _t > 1.0:
 		_go(S.IDLE)
 
@@ -507,7 +575,12 @@ func _update_strikes(delta: float) -> void:
 			var p: Vector3 = s["pos"]
 			FX.lightning(get_parent(), p + Vector3(randf_range(-4, 4), 60, randf_range(-4, 4)), p)
 			Sounds.play(get_parent(), Sounds.thunder(), p, 4.0)
-			_boom(p, 4.0, 75.0)
+			_boom(p, 4.5, 95.0)
+			# bolts that land on a building can bring it down
+			if city and randf() < 0.3:
+				var bi: int = city.call("building_at", p, 1.5)
+				if bi >= 0:
+					city.call("smash", bi, p, self)
 			ring.queue_free()
 			_strikes.erase(s)
 
