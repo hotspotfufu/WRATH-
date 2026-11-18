@@ -2,7 +2,8 @@ extends CharacterBody3D
 ## You: first-person soldier.
 ## Mouse / keyboard:  WASD move, Shift sprint, Space jump, C or Ctrl crouch,
 ##   left click fire, right click aim, R reload, E pick up / enter vehicle,
-##   1 / 2 / Q / mouse wheel switch weapon, Esc release the mouse.
+##   Q or mouse wheel = next weapon, 1 / 2 / 3 = pick a slot, Esc release the mouse.
+##   You can carry 3 weapons.
 ## Gamepad: left stick move, right stick look, RT fire, LT aim, A jump,
 ##   B crouch, X reload / use, Y switch weapon, L3 sprint.
 
@@ -81,7 +82,7 @@ func _setup_input() -> void:
 	var keys := {
 		"move_f": [KEY_W, KEY_UP], "move_b": [KEY_S, KEY_DOWN], "move_l": [KEY_A, KEY_LEFT], "move_r": [KEY_D, KEY_RIGHT],
 		"jump": [KEY_SPACE], "sprint": [KEY_SHIFT], "crouch": [KEY_C, KEY_CTRL], "reload": [KEY_R],
-		"use": [KEY_E, KEY_F], "slot1": [KEY_1], "slot2": [KEY_2], "swap": [KEY_Q], "release_mouse": [KEY_ESCAPE],
+		"use": [KEY_E, KEY_F], "slot1": [KEY_1], "slot2": [KEY_2], "slot3": [KEY_3], "swap": [KEY_Q, KEY_TAB], "release_mouse": [KEY_ESCAPE],
 	}
 	for a in keys:
 		_ensure(a)
@@ -151,12 +152,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		_look(-m.relative.x * s, -m.relative.y * s)
 	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
 		var b := (event as InputEventMouseButton).button_index
-		if b == MOUSE_BUTTON_WHEEL_UP or b == MOUSE_BUTTON_WHEEL_DOWN:
-			_switch()
+		if b == MOUSE_BUTTON_WHEEL_DOWN:
+			_switch(1)
+		elif b == MOUSE_BUTTON_WHEEL_UP:
+			_switch(-1)
 	if event.is_action_pressed("slot1"):
 		_equip(0)
 	elif event.is_action_pressed("slot2") and slots.size() > 1:
 		_equip(1)
+	elif event.is_action_pressed("slot3") and slots.size() > 2:
+		_equip(2)
 	elif event.is_action_pressed("swap"):
 		_switch()
 	elif event.is_action_pressed("reload"):
@@ -226,12 +231,16 @@ func _equip(i: int) -> void:
 	if _gun:
 		_gun.queue_free()
 	_gun = Weapons.build_model(weapon()["id"])
+	Weapons.add_hands(_gun, weapon()["id"])
 	_view.add_child(_gun)
 
 
-func _switch() -> void:
+const MAX_SLOTS := 3
+
+
+func _switch(step: int = 1) -> void:
 	if slots.size() > 1:
-		_equip(1 - current)
+		_equip(posmod(current + step, slots.size()))
 
 
 func give_weapon(id: String) -> void:
@@ -243,7 +252,7 @@ func give_weapon(id: String) -> void:
 	var w := {"id": id, "mag": int(d["mag"]), "reserve": int(d["reserve"]) / 2}
 	if id == "hammer":
 		w["reserve"] = 0
-	if slots.size() < 2:
+	if slots.size() < MAX_SLOTS:
 		slots.append(w)
 		_equip(slots.size() - 1)
 	else:
@@ -296,7 +305,7 @@ func _update_weapon(delta: float, hv: float, sprinting: bool) -> void:
 			w["reserve"] = int(w["reserve"]) - take
 
 	# where the gun sits: hip, aimed, sprinting, reloading, switching
-	var hip := Vector3(0.24, -0.22, -0.45)
+	var hip := Vector3(0.21, -0.19, -0.5)
 	var ads := Vector3(0.0, -0.13 if w["id"] != "sniper" else -0.2, -0.32)
 	var pos := hip.lerp(ads, _ads)
 	pos += Vector3(sin(_bob) * 0.015, -absf(cos(_bob)) * 0.012, 0) * (1.0 - _ads)
@@ -440,9 +449,20 @@ func _use() -> void:
 	if best:
 		best.call("enter", self)
 		return
+	var chest := nearest_chest()
+	if chest:
+		chest.call("open", self)
+		return
 	var item := nearest_pickup()
 	if item:
 		item.call("take", self)
+
+
+func nearest_chest() -> Node:
+	for ch in get_tree().get_nodes_in_group("chests"):
+		if (ch as Node3D).global_position.distance_to(global_position) < 2.4:
+			return ch
+	return null
 
 
 func nearest_pickup() -> Node:

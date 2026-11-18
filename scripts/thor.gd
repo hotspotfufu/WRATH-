@@ -12,8 +12,14 @@ signal defeated
 
 enum S { FALL, ROAR, IDLE, WALK, THROW, LEAP, SMASH, LIGHTNING, STOMP, DEAD }
 
-var max_hp := 7500.0
-var hp := 7500.0
+## Thor has 3 health bars. Each bar is a full god's worth of health:
+## bar 3 = blue, bar 2 = purple, bar 1 = gold. Breaking a bar makes him stronger.
+const BARS := 3
+const BAR_HP := 20000.0
+var max_hp := BAR_HP * BARS
+var hp := BAR_HP * BARS
+var damage_taken := 0.4           ## Thor only takes 40% of incoming damage
+var _phase_shield := 0.0          ## brief invulnerability when a bar breaks
 var dead := false
 var city: Node = null
 
@@ -23,6 +29,7 @@ var _target: Node3D = null
 var _cd := {"throw": 2.0, "smash": 6.0, "lightning": 5.0, "stomp": 0.0, "leap": 8.0}
 var _hammer_out := false
 var _enraged := false
+var _rage_level := 0             ## 0, 1, 2: rises with each broken health bar
 var _did := false
 var _leap_from := Vector3.ZERO
 var _leap_to := Vector3.ZERO
@@ -164,7 +171,8 @@ func _build_hammer(parent: Node3D, s: float) -> void:
 func _physics_process(delta: float) -> void:
 	_t += delta
 	for k in _cd:
-		_cd[k] -= delta * (1.5 if _enraged else 1.0)
+		_cd[k] -= delta * (1.0 + 0.45 * _rage_level)
+	_phase_shield = maxf(0.0, _phase_shield - delta)
 	_flash = maxf(0.0, _flash - delta * 5.0)
 	match _s:
 		S.FALL:
@@ -181,7 +189,7 @@ func _physics_process(delta: float) -> void:
 			velocity.x = 0
 			velocity.z = 0
 			_gravity(delta)
-			if _t > (0.25 if _enraged else 0.6):
+			if _t > maxf(0.15, 0.6 - 0.2 * _rage_level):
 				_choose()
 		S.WALK:
 			_walk_toward(delta)
@@ -203,10 +211,11 @@ func _physics_process(delta: float) -> void:
 
 func _tint() -> void:
 	# red flash when hit
+	var shield := _phase_shield > 0.0
 	for m in _flash_mats:
-		m.emission_enabled = _flash > 0.03
-		m.emission = Color(1.0, 0.25, 0.2)
-		m.emission_energy_multiplier = _flash * 0.5
+		m.emission_enabled = _flash > 0.03 or shield
+		m.emission = Color(0.5, 0.75, 1.0) if shield else Color(1.0, 0.25, 0.2)
+		m.emission_energy_multiplier = (0.8 + 0.4 * sin(_t * 20.0)) if shield else _flash * 0.5
 	_rig.scale = Vector3.ONE * (1.0 + _flash * 0.03)
 	if _cape:
 		_cape.rotation.x = 0.15 + sin(_t * 3.0) * 0.08 + velocity.length() * 0.02
@@ -301,7 +310,7 @@ func _walk_toward(delta: float) -> void:
 	var to := _target.global_position - global_position
 	to.y = 0
 	_face(_target.global_position)
-	var speed := 7.5 if _enraged else 5.5
+	var speed := 5.5 + 1.8 * _rage_level
 	velocity.x = -sin(rotation.y) * speed
 	velocity.z = -cos(rotation.y) * speed
 	_gravity(delta)
@@ -447,7 +456,7 @@ func _do_lightning(_delta: float) -> void:
 		_voice.play()
 		var fighters := get_tree().get_nodes_in_group("fighters")
 		fighters.shuffle()
-		var n := 5 if _enraged else 3
+		var n := 3 + 2 * _rage_level
 		for f in fighters:
 			if n <= 0:
 				break
@@ -556,14 +565,37 @@ func _shake(amount: float, rng: float) -> void:
 func take_damage(amount: float, _from: Node) -> void:
 	if dead or _s == S.FALL:
 		return
+	if _phase_shield > 0.0:
+		return
+	var bars_before := bars_left()
+	amount *= damage_taken
 	hp = maxf(0.0, hp - amount)
 	_flash = minf(0.6, _flash + amount / 120.0)
-	if not _enraged and hp < max_hp * 0.5:
-		_enraged = true
-		get_tree().call_group("game", "banner", "THOR IS ENRAGED!", "He's faster and calls more lightning", 2.5)
-		_go(S.LIGHTNING)
 	if hp <= 0.0:
 		_die()
+		return
+	if bars_left() < bars_before:
+		_break_bar(bars_left())
+
+
+func bars_left() -> int:
+	return int(ceil(hp / BAR_HP - 0.0001))
+
+
+func _break_bar(left: int) -> void:
+	# a health bar breaks: he roars, shields himself for a moment and powers up
+	_phase_shield = 2.5
+	_enraged = true
+	_rage_level = BARS - left
+	_shockwave(global_position, 16.0, 60.0)
+	for i in 6:
+		var a := TAU * i / 6.0
+		_add_strike(global_position + Vector3(cos(a), 0, sin(a)) * randf_range(8.0, 20.0))
+	if left == 2:
+		get_tree().call_group("game", "banner", "THOR IS ENRAGED!", "Health bar 2 of 3 - he's faster and calls more lightning", 3.0)
+	else:
+		get_tree().call_group("game", "banner", "GOD OF THUNDER UNLEASHED!", "Final health bar - finish him!", 3.0)
+	_go(S.ROAR)
 
 
 func _die() -> void:

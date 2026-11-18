@@ -50,8 +50,10 @@ func _build_world() -> void:
 	var we := WorldEnvironment.new()
 	_env = Environment.new()
 	_sky = ProceduralSkyMaterial.new()
-	_sky.sky_top_color = Color(0.25, 0.48, 0.85)
-	_sky.sky_horizon_color = Color(0.7, 0.8, 0.9)
+	_sky.sky_top_color = Color(0.22, 0.45, 0.82)
+	_sky.sky_horizon_color = Color(0.78, 0.82, 0.86)
+	_sky.sun_angle_max = 20.0
+	_sky.sky_curve = 0.12
 	_sky.ground_horizon_color = Color(0.6, 0.65, 0.7)
 	_sky.ground_bottom_color = Color(0.3, 0.32, 0.35)
 	var sky := Sky.new()
@@ -59,7 +61,8 @@ func _build_world() -> void:
 	_env.background_mode = Environment.BG_SKY
 	_env.sky = sky
 	_env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	_env.ambient_light_energy = 0.9
+	_env.ambient_light_energy = 0.55
+	_env.tonemap_exposure = 0.9
 	_env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	_env.fog_enabled = true
 	_env.fog_light_color = Color(0.7, 0.78, 0.88)
@@ -70,8 +73,12 @@ func _build_world() -> void:
 	we.environment = _env
 	add_child(we)
 	_sun = DirectionalLight3D.new()
-	_sun.rotation = Vector3(deg_to_rad(-50), deg_to_rad(35), 0)
-	_sun.light_energy = 1.3
+	_sun.rotation = Vector3(deg_to_rad(-38), deg_to_rad(40), 0)
+	_sun.light_color = Color(1.0, 0.94, 0.84)
+	_sun.light_energy = 1.15
+	_env.adjustment_enabled = true
+	_env.adjustment_contrast = 1.08
+	_env.adjustment_saturation = 1.12
 	_sun.shadow_enabled = true
 	_sun.directional_shadow_max_distance = 90.0
 	add_child(_sun)
@@ -81,21 +88,30 @@ func _spawn_loot() -> void:
 	var pts: Array[Vector3] = city.get("loot_points")
 	pts.shuffle()
 	var scene: Script = load("res://scripts/loot.gd")
-	var count := mini(pts.size(), 220)
+	var count := mini(pts.size(), 420)
 	for i in count:
 		var l: Area3D = scene.new()
 		var r := _rng.randf()
-		if r < 0.55:
+		if r < 0.72:
 			l.set("kind", "weapon")
 			l.set("id", Weapons.LOOT_TABLE[_rng.randi() % Weapons.LOOT_TABLE.size()])
-		elif r < 0.72:
+		elif r < 0.82:
 			l.set("kind", "ammo")
-		elif r < 0.86:
+		elif r < 0.91:
 			l.set("kind", "armor")
 		else:
 			l.set("kind", "health")
 		add_child(l)
 		l.global_position = pts[i]
+
+
+	# a gun rack in every block: rifle, shotgun and sniper side by side
+	for bx in CityScript.BLOCKS:
+		for bz in CityScript.BLOCKS:
+			var c: Vector3 = city.call("_block_centre", bx, bz)
+			var ids := ["rifle", "shotgun", "sniper"] if _rng.randf() < 0.7 else ["rifle", "shotgun", "rocket"]
+			for k in ids.size():
+				drop_weapon(ids[k], c + Vector3(-2.5 + k * 2.5, 0.8, -6.0))
 
 
 func drop_weapon(id: String, at: Vector3) -> void:
@@ -109,8 +125,10 @@ func drop_weapon(id: String, at: Vector3) -> void:
 func _spawn_jeeps() -> void:
 	var pts: Array[Transform3D] = city.get("vehicle_points")
 	pts.shuffle()
+	var kinds := ["jeep", "jeep", "jeep", "jeep", "mrap", "mrap", "mrap", "apc", "apc", "apc"]
 	for i in mini(pts.size(), MAX_JEEPS):
 		var j: VehicleBody3D = load("res://scripts/jeep.gd").new()
+		j.set("kind", kinds[i % kinds.size()])
 		add_child(j)
 		j.global_transform = pts[i]
 
@@ -289,12 +307,12 @@ func _apply_shake(delta: float) -> void:
 
 func _update_storm(delta: float) -> void:
 	var s := _storm
-	_sky.sky_top_color = Color(0.25, 0.48, 0.85).lerp(Color(0.12, 0.13, 0.2), s)
-	_sky.sky_horizon_color = Color(0.7, 0.8, 0.9).lerp(Color(0.3, 0.32, 0.4), s)
-	_sun.light_energy = lerpf(1.3, 0.45, s)
-	_env.fog_density = lerpf(0.0035, 0.009, s)
+	_sky.sky_top_color = Color(0.22, 0.45, 0.82).lerp(Color(0.12, 0.13, 0.2), s)
+	_sky.sky_horizon_color = Color(0.78, 0.82, 0.86).lerp(Color(0.3, 0.32, 0.4), s)
+	_sun.light_energy = lerpf(1.15, 0.45, s)
+	_env.fog_density = lerpf(0.0022, 0.009, s)
 	_env.fog_light_color = Color(0.7, 0.78, 0.88).lerp(Color(0.25, 0.27, 0.35), s)
-	_env.ambient_light_energy = lerpf(0.9, 0.55, s)
+	_env.ambient_light_energy = lerpf(0.55, 0.4, s)
 	if s > 0.5 and phase in ["boss", "loot"]:
 		_thunder_t -= delta
 		if _thunder_t <= 0.0:
