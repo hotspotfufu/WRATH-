@@ -151,15 +151,21 @@ func _draw_boss_bars(boss: Node, cx: float) -> void:
 	var left := int(boss.call("bars_left"))
 	var in_bar := hp - per * (left - 1)
 	var frac := clampf(in_bar / per, 0.0, 1.0)
+	var single := int(boss.get("BARS")) == 1
 	var r := Rect2(cx - 420, 72, 840, 26)
 	_text("THOR, GOD OF THUNDER", Vector2(cx, 58), 30, Color(0.75, 0.88, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
 	var top: Color = BAR_COLORS[clampi(left - 1, 0, 2)]
+	if single:
+		top = Color(0.35, 0.65, 1.0).lerp(Color(0.95, 0.2, 0.2), 1.0 - frac)
 	var under := Color(0, 0, 0, 0.5)
 	if left > 1:
 		under = (BAR_COLORS[left - 2] as Color).darkened(0.25)
 	if float(boss.get("_phase_shield")) > 0.0:
 		top = Color(0.85, 0.95, 1.0, 0.6 + 0.4 * sin(_time * 18.0))
 	_bar(r, frac, top, under, 10)
+	if single:
+		_text("%d%%" % int(ceil(frac * 100.0)), Vector2(cx + 435, 94), 26, top)
+		return
 	# pips: how many bars are left
 	for i in 3:
 		var pc := Vector2(cx + 450 + i * 26, 85)
@@ -183,7 +189,7 @@ func _draw_player(p: Node, sz: Vector2) -> void:
 	_bar(Rect2(cx - 300, sz.y - 94, 600, 16), health / float(p.get("max_health")), hcol, Color(0, 0, 0, 0.5), 10)
 	_text("HEALTH  %d" % int(health), Vector2(cx + 300, sz.y - 54), 20, Color(1.0, 0.6, 0.6), HORIZONTAL_ALIGNMENT_RIGHT)
 	if shield < 1.0:
-		_text("ARMOR BROKEN - find armor" if not low else "LOW HEALTH - find a health pack!", Vector2(cx, sz.y - 165), 24, hcol if low else Color(0.6, 0.85, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
+		_text("ARMOR BROKEN - find armor (health recovers if you take cover)" if not low else "LOW HEALTH - take cover or grab a health pack!", Vector2(cx, sz.y - 165), 24, hcol if low else Color(0.6, 0.85, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
 
 	var in_v: Node = p.get("in_vehicle")
 	if in_v:
@@ -311,7 +317,7 @@ func _draw_start(sz: Vector2) -> void:
 	var cx := sz.x * 0.5
 	_c.draw_rect(Rect2(Vector2.ZERO, sz), Color(0.02, 0.04, 0.08, 0.72))
 	_text("GOD HUNT", Vector2(cx, sz.y * 0.24), 120, Color(1.0, 0.85, 0.45), HORIZONTAL_ALIGNMENT_CENTER)
-	_text("100 soldiers.  2:00 to gear up.  Then THOR falls from the sky.", Vector2(cx, sz.y * 0.24 + 70), 34, Color(0.85, 0.9, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
+	_text("100 soldiers.  1:30 to gear up.  Then THOR falls from the sky.", Vector2(cx, sz.y * 0.24 + 70), 34, Color(0.85, 0.9, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
 	var lines := [
 		"WASD  move        SHIFT  sprint        SPACE  jump        C  crouch",
 		"MOUSE  look        LEFT CLICK  fire        RIGHT CLICK  aim",

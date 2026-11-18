@@ -14,8 +14,8 @@ enum S { FALL, ROAR, IDLE, WALK, THROW, LEAP, SMASH, LIGHTNING, STOMP, DEAD }
 
 ## Thor has 3 health bars. Each bar is a full god's worth of health:
 ## bar 3 = blue, bar 2 = purple, bar 1 = gold. Breaking a bar makes him stronger.
-const BARS := 3
-const BAR_HP := 8000.0
+const BARS := 1
+const BAR_HP := 24000.0
 var max_hp := BAR_HP * BARS
 var hp := BAR_HP * BARS
 var damage_taken := 0.35          ## Thor only takes 35% of incoming damage
@@ -649,6 +649,20 @@ func take_damage(amount: float, _from: Node) -> void:
 		return
 	if bars_left() < bars_before:
 		_break_bar(bars_left())
+	# one long health bar: he gets angrier at half health and again at 20%
+	elif _rage_level == 0 and hp < max_hp * 0.5:
+		_rage(1, "THOR IS ENRAGED!", "Half health - he's faster and calls more lightning")
+	elif _rage_level == 1 and hp < max_hp * 0.2:
+		_rage(2, "GOD OF THUNDER UNLEASHED!", "He's almost down - finish him!")
+
+
+func _rage(level: int, title: String, sub: String) -> void:
+	_rage_level = level
+	_enraged = true
+	_phase_shield = 1.5
+	_shockwave(global_position, 16.0, 60.0)
+	get_tree().call_group("game", "banner", title, sub, 3.0)
+	_go(S.ROAR)
 
 
 func bars_left() -> int:

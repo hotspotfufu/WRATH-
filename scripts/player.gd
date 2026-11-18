@@ -39,6 +39,10 @@ var _recoil := 0.0
 var _bob := 0.0
 var _crouch := 0.0
 var _since_hit := 10.0
+var _thor_safe := 0.0
+const THOR_HIT := 55.0          ## one Thor hit (after your armor is gone) takes 55 of 100 health
+const REGEN_DELAY := 5.0        ## health starts coming back 5 s after your last hit
+const REGEN_RATE := 10.0        ## health per second
 var _swap_t := 0.0
 var _throwing := false
 var _sfx: AudioStreamPlayer
@@ -212,9 +216,11 @@ func _physics_process(delta: float) -> void:
 	_update_weapon(delta, hv, sprinting)
 
 	# shield recharge, Halo style
+	# armor never regenerates (find armor pickups); health slowly does
 	_since_hit += delta
-	if _since_hit > 4.0 and shield < max_shield:
-		shield = minf(max_shield, shield + 45.0 * delta)
+	_thor_safe = maxf(0.0, _thor_safe - delta)
+	if _since_hit > REGEN_DELAY and health < max_health:
+		health = minf(max_health, health + REGEN_RATE * delta)
 	if global_position.y < -30:
 		take_damage(9999, null)
 
@@ -270,8 +276,7 @@ func give_ammo() -> void:
 
 
 func give_armor() -> void:
-	max_shield = 150.0
-	shield = max_shield
+	shield = minf(max_shield, shield + 50.0)
 
 
 func heal(amount: float) -> void:
@@ -488,9 +493,28 @@ func set_in_vehicle(v: Node) -> void:
 func take_damage(amount: float, from: Node) -> void:
 	if dead:
 		return
+	var from_thor := from != null and is_instance_valid(from) and from.has_method("bars_left")
 	if in_vehicle and in_vehicle.has_method("take_damage") and amount < 9000:
 		in_vehicle.call("take_damage", amount, from)
+		if from_thor:
+			return               # the vehicle's armor takes Thor's hit for you
 		amount *= 0.3
+	if from_thor:
+		# Thor's hits: 1st hit breaks your armor, 2nd hurts you badly, 3rd kills.
+		# A short safety window stops one attack from counting as several hits.
+		if _thor_safe > 0.0:
+			return
+		_thor_safe = 1.2
+		_since_hit = 0.0
+		if shield > 0.0:
+			shield = 0.0
+		else:
+			health -= THOR_HIT
+		if _hud:
+			_hud.call("damage_flash", from)
+		if health <= 0.0:
+			_die()
+		return
 	_since_hit = 0.0
 	var to_shield := minf(shield, amount)
 	shield -= to_shield
@@ -498,6 +522,13 @@ func take_damage(amount: float, from: Node) -> void:
 	if _hud:
 		_hud.call("damage_flash", from)
 	if health <= 0.0:
+		_die()
+
+
+func _die() -> void:
+	if dead:
+		return
+	if true:
 		health = 0.0
 		dead = true
 		remove_from_group("fighters")

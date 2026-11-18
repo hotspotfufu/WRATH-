@@ -1,12 +1,12 @@
 extends Node3D
 ## Runs a match of GOD HUNT:
-##   1. LOOT (2:00) - 100 soldiers drop into the city and grab weapons, armor, jeeps
+##   1. LOOT (1:30) - 100 soldiers drop into the city and grab weapons, armor, jeeps
 ##   2. STORM - the sky darkens, thunder rolls
 ##   3. BOSS - Thor crashes down and tries to wipe everyone out
 ##   4. Kill Thor -> his hammer drops. Pick it up to claim Mjolnir.
 
 const CityScript := preload("res://scripts/city.gd")
-const LOOT_TIME := 120.0
+const LOOT_TIME := 90.0
 const SOLDIERS := 99            # plus you = 100
 const MAX_JEEPS := 10
 
@@ -164,7 +164,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		phase = "loot"
 		hud.set("start_screen", false)
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-		hud.call("banner", "GEAR UP!", "Thor arrives in 2:00 - armor and health do NOT regenerate, grab health packs!", 4.0)
+		hud.call("banner", "GEAR UP!", "Thor arrives in 1:30 - armor does NOT come back, so grab armor and health packs!", 4.0)
 		get_viewport().set_input_as_handled()
 	elif phase in ["won_end", "lost"] and _spectate_t > 1.5:
 		if (event is InputEventKey and (event as InputEventKey).keycode == KEY_ENTER) or (event is InputEventMouseButton and (event as InputEventMouseButton).pressed) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).pressed):

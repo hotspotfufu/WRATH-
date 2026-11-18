@@ -310,7 +310,7 @@ func give_ammo() -> void:
 
 
 func give_armor() -> void:
-	shield = 100.0
+	shield = minf(100.0, shield + 50.0)
 
 
 func heal(amount: float) -> void:

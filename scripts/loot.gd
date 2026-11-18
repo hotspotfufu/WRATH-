@@ -114,7 +114,7 @@ func take(by: Node) -> void:
 				by.call("give_armor")
 		"health":
 			if by.has_method("heal"):
-				by.call("heal", 60.0)
+				by.call("heal", 40.0)
 	_taken = true
 	if by.is_in_group("player"):
 		Sounds.play(get_parent(), Sounds.pickup(), global_position, -4.0)
