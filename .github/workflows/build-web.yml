@@ -43,6 +43,11 @@ jobs:
             if [ -f "$2/$1" ]; then rm -f "$1"; echo "removed duplicate $1 (kept $2/$1)"
             else mkdir -p "$2" && mv -f "$1" "$2/$1" && echo "moved $1 -> $2/"; fi
           }
+          # files uploaded as a folder inside scripts/ (scripts/scripts/...) replace the old ones
+          if [ -d scripts/scripts ]; then
+            for f in scripts/scripts/*; do [ -f "$f" ] && mv -f "$f" scripts/ && echo "moved $f -> scripts/"; done
+            rm -rf scripts/scripts
+          fi
           for f in game.gd city.gd player.gd weapons.gd loot.gd jeep.gd soldier.gd thor.gd hud.gd fx.gd sounds.gd; do move "$f" scripts; done
           move ci_verify.gd tools
           # Stale editor caches from another machine can confuse the import.
