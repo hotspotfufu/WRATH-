@@ -31,6 +31,9 @@ uniform vec3 trim : source_color = vec3(0.3, 0.32, 0.36);
 uniform float windows = 1.0;
 uniform float floor_h = 4.0;
 uniform float win_w = 3.0;
+uniform sampler2D surface : source_color, filter_linear_mipmap, repeat_enable;
+uniform float tex_size = 6.0;       // metres covered by one copy of the texture
+uniform float raw_color = 0.0;      // 1 = use the texture's own colour (brick)
 varying vec3 wp;
 varying vec3 wn;
 void vertex() {
@@ -39,7 +42,10 @@ void vertex() {
 }
 float hash(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
 void fragment() {
-	vec3 c = base;
+	// facade texture, projected in world space so it never stretches
+	vec2 tuv = abs(wn.y) > 0.5 ? wp.xz : vec2(abs(wn.x) > 0.5 ? wp.z : wp.x, wp.y);
+	vec3 tx = texture(surface, tuv / tex_size).rgb;
+	vec3 c = mix(base * tx * 1.45, tx * (base / 0.6), raw_color);
 	float rough = 0.85;
 	float metal = 0.0;
 	if (abs(wn.y) < 0.5 && windows > 0.5) {
@@ -63,9 +69,7 @@ void fragment() {
 		c = mix(c, trim, step(f.y, 0.06));
 		c *= 1.0 - 0.25 * step(0.2, f.y) * step(f.y, 0.26) * step(0.16, f.x) * step(f.x, 0.84);
 	}
-	// concrete / stone texture
-	float n = hash(floor(wp.xz * 3.0) + floor(wp.y * 3.0)) * 0.06 + hash(floor(wp.xy * 0.7) + wp.z) * 0.04;
-	c *= 0.95 + n;
+
 	// grime toward the street
 	c *= 0.82 + 0.18 * clamp(wp.y / 6.0, 0.0, 1.0);
 	ALBEDO = c;
@@ -116,12 +120,41 @@ func mat(color: Color, rough: float = 0.9) -> StandardMaterial3D:
 	return m
 
 
+func tex(name: String) -> Texture2D:
+	var key := "tex_" + name
+	if not _mat_cache.has(key):
+		_mat_cache[key] = load(get_script().resource_path.get_base_dir() + "/tex_" + name + ".png")
+	return _mat_cache[key]
+
+
+## textured floor / surface material (world-projected so it tiles at real size)
+func surface_mat(name: String, tint: Color = Color.WHITE, size_m: float = 2.0, rough: float = 0.85) -> StandardMaterial3D:
+	var key := "surf_%s_%s_%s" % [name, tint.to_html(), size_m]
+	if _mat_cache.has(key):
+		return _mat_cache[key]
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = tex(name)
+	m.albedo_color = tint
+	m.uv1_triplanar = true
+	m.uv1_world_triplanar = true
+	m.uv1_scale = Vector3.ONE / size_m
+	m.roughness = rough
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	_mat_cache[key] = m
+	return m
+
+
 func wall_mat(base: Color, windows: bool) -> ShaderMaterial:
 	var key := "wall_%s_%s" % [base.to_html(), windows]
 	if _mat_cache.has(key):
 		return _mat_cache[key]
 	var m := ShaderMaterial.new()
 	m.shader = _wall_shader
+	# warm colours become brick buildings, the rest precast concrete
+	var brick := base.r > base.b + 0.08
+	m.set_shader_parameter("surface", tex("brick") if brick else tex("concrete"))
+	m.set_shader_parameter("tex_size", 2.6 if brick else 7.0)
+	m.set_shader_parameter("raw_color", 1.0 if brick else 0.0)
 	m.set_shader_parameter("base", base)
 	m.set_shader_parameter("trim", base.darkened(0.45))
 	m.set_shader_parameter("windows", 1.0 if windows else 0.0)
@@ -156,41 +189,10 @@ func _build_ground() -> void:
 	ground.name = "Ground"
 	add_child(ground)
 	var size := HALF * 2.0 + 120.0
-	var asphalt := ShaderMaterial.new()
-	asphalt.shader = Shader.new()
-	asphalt.shader.code = """
-shader_type spatial;
-varying vec3 wp;
-void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
-float h(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
-float n(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
-	return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
-void fragment() {
-	float grain = h(floor(wp.xz * 12.0)) * 0.05;
-	float patches = smoothstep(0.55, 0.7, n(wp.xz * 0.08)) * 0.06;
-	float wear = n(wp.xz * 0.5) * 0.05;
-	vec3 c = vec3(0.21, 0.215, 0.23) + grain + wear - patches;
-	ALBEDO = pow(c, vec3(2.2));
-	ROUGHNESS = 0.85 - patches * 3.0;
-}
-"""
+	var asphalt := surface_mat("asphalt", Color(1, 1, 1), 6.0, 0.9)
 	box(ground, Vector3(size, 2, size), Vector3(0, -1, 0), asphalt)
 	# sidewalks with a raised curb look (visual only, flush with the road so vehicles drive smoothly)
-	var plate := ShaderMaterial.new()
-	plate.shader = Shader.new()
-	plate.shader.code = """
-shader_type spatial;
-varying vec3 wp;
-void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
-float h(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
-void fragment() {
-	vec2 t = fract(wp.xz / 1.5);
-	float joint = step(t.x, 0.03) + step(t.y, 0.03);
-	vec3 c = vec3(0.56, 0.55, 0.52) * (0.92 + h(floor(wp.xz / 1.5)) * 0.1);
-	ALBEDO = pow(mix(c, c * 0.75, clamp(joint, 0.0, 1.0)), vec3(2.2));
-	ROUGHNESS = 0.9;
-}
-"""
+	var plate := surface_mat("paver", Color(1, 1, 1), 3.0, 0.85)
 	var curb := mat(Color(0.72, 0.71, 0.68), 0.8)
 	var lines := mat(Color(0.92, 0.92, 0.88), 0.6)
 	for bx in BLOCKS:
@@ -406,6 +408,9 @@ func _new_building(c: Vector3, footprint: Vector2, height: float) -> Dictionary:
 
 
 func _tower(c: Vector3, fp: Vector2, h: float, door_side: int = 0) -> void:
+	if Models.has_ruins():
+		_ruin(c, fp, door_side)
+		return
 	var b := _new_building(c, fp, h)
 	var col: Color = PALETTE[_rng.randi() % PALETTE.size()]
 	b["color"] = col
@@ -430,6 +435,66 @@ func _tower(c: Vector3, fp: Vector2, h: float, door_side: int = 0) -> void:
 	# rooftop HVAC units on the setback
 	for k in _rng.randi_range(2, 4):
 		box(root, Vector3(3.0, 1.4, 2.4), Vector3(_rng.randf_range(-fp.x, fp.x) * 0.3, h1 + 0.7, (fp.y * 0.44 if k % 2 == 0 else -fp.y * 0.44)), metal, false)
+
+
+## one of the bought ruined apartment blocks, scaled up to fill the lot.
+## Its broken floors are real collision, so you can climb into the open storeys.
+var _ruin_order: Array = []
+func _ruin(c: Vector3, fp: Vector2, door_side: int) -> void:
+	if _ruin_order.is_empty():
+		_ruin_order = Models.RUINS.duplicate()
+		for i in range(_ruin_order.size() - 1, 0, -1):
+			var j := _rng.randi_range(0, i)
+			var t = _ruin_order[i]
+			_ruin_order[i] = _ruin_order[j]
+			_ruin_order[j] = t
+	var name: String = _ruin_order.pop_back()
+	var size := Models.ruin_size(name)
+	# long side along the street it faces
+	var turn := (size.x < size.z) != (fp.x < fp.y)
+	var w := size.z if turn else size.x
+	var d := size.x if turn else size.z
+	var sc := clampf(minf(fp.x / w, fp.y / d) * 1.1, 1.15, 1.9)
+	var foot := Vector2(w * sc, d * sc)
+	var b := _new_building(c, foot, size.y * sc)
+	b["color"] = Color(0.5, 0.48, 0.45)
+	var root: Node3D = b["node"]
+	var mi := MeshInstance3D.new()
+	mi.mesh = Models.res(name + ".res")
+	mi.material_override = Models.ruin_mat(name)
+	mi.scale = Vector3.ONE * sc
+	mi.rotation.y = (PI * 0.5 if turn else 0.0) + (PI if door_side == 2 else 0.0)
+	root.add_child(mi)
+	# beyond ~65 m swap to the light far version of the same building
+	var far_mesh: Mesh = Models.res(name + "_far.res")
+	if far_mesh:
+		mi.visibility_range_end = 65.0
+		mi.visibility_range_end_margin = 6.0
+		var fm := MeshInstance3D.new()
+		fm.mesh = far_mesh
+		fm.material_override = mi.material_override
+		fm.scale = mi.scale
+		fm.rotation = mi.rotation
+		fm.visibility_range_begin = 65.0
+		fm.visibility_range_begin_margin = 6.0
+		fm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF   # shadows only reach 90 m anyway
+		root.add_child(fm)
+	var shape: Shape3D = Models.res(name + "_col.res")
+	if shape:
+		var cs := CollisionShape3D.new()
+		cs.shape = shape
+		cs.scale = mi.scale
+		cs.rotation = mi.rotation
+		root.add_child(cs)
+	# supplies scattered around the ruin's base (street side and back)
+	var sgn := 1.0 if door_side == 0 else -1.0
+	loot_points.append(c + Vector3(_rng.randf_range(-foot.x, foot.x) * 0.3, 0.6, sgn * (foot.y * 0.5 + 2.5)))
+	loot_points.append(c + Vector3(foot.x * 0.5 + 2.0, 0.6, _rng.randf_range(-foot.y, foot.y) * 0.3))
+	var chest_script: Script = load(get_script().resource_path.get_base_dir() + "/chest.gd")
+	var ch: StaticBody3D = chest_script.new()
+	ch.position = Vector3(_rng.randf_range(-foot.x, foot.x) * 0.25, 0.0, sgn * (foot.y * 0.5 + 1.2))
+	ch.rotation.y = 0.0 if sgn > 0.0 else PI
+	root.add_child(ch)
 
 
 ## a building you can walk into: doorway on one side, floors linked by ramps,
@@ -459,7 +524,8 @@ func _enterable(c: Vector3, fp: Vector2, floors: int, door_side: int) -> void:
 ## roof_access = false: the top floor is a closed ceiling (a skyscraper continues above)
 func _shell(root: Node3D, c: Vector3, fp: Vector2, floors: int, door_side: int, col: Color, roof_access: bool) -> void:
 	var wm := wall_mat(col, true)
-	var fm := mat(Color(0.58, 0.52, 0.45))
+	# floors alternate between wood and office carpet; ramps are concrete
+	var fm: Material = surface_mat("wood", Color(1, 1, 1), 2.4, 0.7) if _rng.randf() < 0.5 else surface_mat("carpet", Color(1.15, 0.95, 0.75), 4.0, 0.95)
 	var W := fp.x
 	var D := fp.y
 	var door_w := 3.4
@@ -527,6 +593,9 @@ func _shell(root: Node3D, c: Vector3, fp: Vector2, floors: int, door_side: int, 
 		var ang := atan2(FLOOR_H, run)
 		# rises from the front (low) to the back wall (high)
 		box(root, Vector3(rw - 0.2, 0.25, length), Vector3(x0 + rw * 0.5, y0 + FLOOR_H * 0.5, z0 + run * 0.5), fm, true, ang)
+	# ground floor surface + furniture on every floor
+	box(root, Vector3(W - WALL * 2, 0.06, D - WALL * 2), Vector3(0, 0.12, 0), fm, false)
+	_furnish(root, W, D, floors - (0 if roof_access else 0), door_side, x0 + rw + 0.6)
 
 
 func _build_plaza(c: Vector3) -> void:
@@ -580,15 +649,15 @@ func _build_street_props() -> void:
 				var off := _rng.randf_range(-32, 32)
 				var side := 1.0 if _rng.randf() < 0.5 else -1.0
 				var p := Vector3(t + off, 0, r + side * 9.0) if horizontal else Vector3(r + side * 9.0, 0, t + off)
-				if Vector2(p.x, p.z).length() < ARENA_R:
-					continue
+				if Vector2(p.x, p.z).length() < ARENA_R or absf(p.x) > HALF - 6.0 or absf(p.z) > HALF - 6.0:
+					continue       # keep the boss arena and the map's outer walls clear
 				if _rng.randf() < 0.5:
 					var cm := mat(car_cols[_rng.randi() % car_cols.size()], 0.35)
 					var sz := Vector3(4.2, 1.2, 1.9) if horizontal else Vector3(1.9, 1.2, 4.2)
 					box(body, sz, p + Vector3(0, 0.75, 0), cm)
 					var top := Vector3(2.2, 0.7, 1.7) if horizontal else Vector3(1.7, 0.7, 2.2)
 					box(body, top, p + Vector3(0, 1.7, 0), mat(Color(0.15, 0.2, 0.25), 0.1), false)
-				elif _rng.randf() < 0.3:
+				elif _rng.randf() < 0.45:
 					var yaw := 0.0 if horizontal else PI * 0.5
 					vehicle_points.append(Transform3D(Basis(Vector3.UP, yaw), p + Vector3(0, 1.0, 0)))
 				elif _rng.randf() < 0.4:
@@ -643,11 +712,32 @@ func smash(index: int, from: Vector3, by: Node = null) -> void:
 	tw.tween_property(root, "position:y", -h - 2.0, 2.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.parallel().tween_property(root, "rotation:z", _rng.randf_range(-0.12, 0.12), 2.4)
 	tw.tween_callback(root.queue_free)
-	# rubble pile
+	# rubble pile: the bought debris heap rises out of the dust
 	var rubble := StaticBody3D.new()
 	add_child(rubble)
+	if Models.has(Models.PILES[0] + ".res"):
+		var pname: String = Models.PILES[_rng.randi() % Models.PILES.size()]
+		var psize := Models.ruin_size(pname)
+		var ps := maxf(aabb.size.x / psize.x, aabb.size.z / psize.z) * 0.95
+		var pile := MeshInstance3D.new()
+		pile.mesh = Models.res(pname + ".res")
+		pile.material_override = Models.ruin_mat(pname)
+		pile.scale = Vector3(ps, ps * 0.9, ps)
+		pile.rotation.y = _rng.randf() * TAU
+		var centre := aabb.get_center()
+		pile.position = Vector3(centre.x, -4.0 * ps, centre.z)
+		rubble.add_child(pile)
+		var pshape: Shape3D = Models.res(pname + "_col.res")
+		if pshape:
+			var pcs := CollisionShape3D.new()
+			pcs.shape = pshape
+			pcs.scale = pile.scale
+			pcs.rotation = pile.rotation
+			pcs.position = Vector3(centre.x, 0.0, centre.z)
+			rubble.add_child(pcs)
+		create_tween().tween_property(pile, "position:y", 0.0, 1.8).set_delay(0.6).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	var rm := mat((b["color"] as Color).darkened(0.35))
-	for i in 6:
+	for i in (0 if Models.has(Models.PILES[0] + ".res") else 6):
 		var s := Vector3(_rng.randf_range(2, 5), _rng.randf_range(0.6, 1.8), _rng.randf_range(2, 5))
 		var p := aabb.get_center() + Vector3(_rng.randf_range(-aabb.size.x, aabb.size.x) * 0.35, s.y * 0.5, _rng.randf_range(-aabb.size.z, aabb.size.z) * 0.35)
 		var mi := box(rubble, s, Vector3(p.x, -2.0, p.z), rm)
@@ -693,3 +783,122 @@ func _debris(aabb: AABB, from: Vector3, col: Color) -> void:
 	tw.tween_callback(func():
 		_debris_alive -= 1
 		rb.queue_free())
+
+
+# ------------------------------------------------------------------ furniture & chests
+var _furn := {}            # material key -> SurfaceTool (merged per building)
+var _furn_mats := {}
+
+
+func _fadd(key: String, m: Material, size: Vector3, pos: Vector3) -> void:
+	if not _furn.has(key):
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_furn[key] = st
+		_furn_mats[key] = m
+	var st: SurfaceTool = _furn[key]
+	var h := size * 0.5
+	var faces := [
+		[Vector3(0, 0, 1), [Vector3(-h.x, -h.y, h.z), Vector3(h.x, -h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(-h.x, h.y, h.z)]],
+		[Vector3(0, 0, -1), [Vector3(h.x, -h.y, -h.z), Vector3(-h.x, -h.y, -h.z), Vector3(-h.x, h.y, -h.z), Vector3(h.x, h.y, -h.z)]],
+		[Vector3(1, 0, 0), [Vector3(h.x, -h.y, h.z), Vector3(h.x, -h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(h.x, h.y, h.z)]],
+		[Vector3(-1, 0, 0), [Vector3(-h.x, -h.y, -h.z), Vector3(-h.x, -h.y, h.z), Vector3(-h.x, h.y, h.z), Vector3(-h.x, h.y, -h.z)]],
+		[Vector3(0, 1, 0), [Vector3(-h.x, h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(h.x, h.y, -h.z), Vector3(-h.x, h.y, -h.z)]],
+		[Vector3(0, -1, 0), [Vector3(-h.x, -h.y, -h.z), Vector3(h.x, -h.y, -h.z), Vector3(h.x, -h.y, h.z), Vector3(-h.x, -h.y, h.z)]],
+	]
+	for fc in faces:
+		var n: Vector3 = fc[0]
+		var v: Array = fc[1]
+		for i in [0, 2, 1, 0, 3, 2]:
+			st.set_normal(n)
+			st.add_vertex(pos + v[i])
+
+
+func _fsolid(root: Node3D, size: Vector3, pos: Vector3) -> void:
+	var cs := CollisionShape3D.new()
+	var sh := BoxShape3D.new()
+	sh.size = size
+	cs.shape = sh
+	cs.position = pos
+	root.add_child(cs)
+
+
+func _furnish(root: Node3D, W: float, D: float, floors: int, door_side: int, x_min: float) -> void:
+	_furn.clear()
+	_furn_mats.clear()
+	var wood := surface_mat("wood", Color(0.85, 0.75, 0.65), 1.2, 0.6)
+	var metal := surface_mat("metal", Color(0.45, 0.47, 0.5), 1.5, 0.4)
+	var crate := surface_mat("metal", Color(0.36, 0.42, 0.3), 1.2, 0.6)
+	var fabric_cols := [Color(0.25, 0.3, 0.42), Color(0.45, 0.2, 0.18), Color(0.3, 0.3, 0.32), Color(0.55, 0.5, 0.42)]
+	var fabric := mat(fabric_cols[_rng.randi() % fabric_cols.size()], 0.95)
+	var black := mat(Color(0.05, 0.05, 0.06), 0.3)
+	var x_max := W * 0.5 - WALL - 0.4
+	var z_max := D * 0.5 - WALL - 0.4
+	var dz := 1.0 if door_side == 0 else -1.0       # which side the door is on
+	var chest_script: Script = load(get_script().resource_path.get_base_dir() + "/chest.gd")
+	for f in floors:
+		var y := f * FLOOR_H + (0.15 if f == 0 else 0.0)
+		var kind := _rng.randi() % 3
+		var cx := (x_min + x_max) * 0.5
+		# keep a clear lane from the door / ramp to the middle of the room
+		var back := -dz * (z_max - 1.2)
+		match kind:
+			0:  # office: rows of desks with monitors and chairs, filing cabinets on the wall
+				for row in 2:
+					var zz := -dz * (z_max * 0.15 + row * 3.2)
+					for k in 2:
+						var xx := cx - 1.2 + k * 2.6
+						if xx + 0.8 > x_max:
+							continue
+						_fadd("wood", wood, Vector3(1.6, 0.06, 0.8), Vector3(xx, y + 0.74, zz))
+						_fadd("metal", metal, Vector3(0.06, 0.72, 0.7), Vector3(xx - 0.75, y + 0.36, zz))
+						_fadd("metal", metal, Vector3(0.06, 0.72, 0.7), Vector3(xx + 0.75, y + 0.36, zz))
+						_fadd("black", black, Vector3(0.6, 0.38, 0.04), Vector3(xx, y + 1.0, zz - 0.25))
+						_fadd("fabric", fabric, Vector3(0.5, 0.45, 0.5), Vector3(xx, y + 0.25, zz + 0.65))
+						_fadd("fabric", fabric, Vector3(0.5, 0.55, 0.08), Vector3(xx, y + 0.75, zz + 0.88))
+						_fsolid(root, Vector3(1.6, 0.8, 0.8), Vector3(xx, y + 0.4, zz))
+				for k in 3:
+					var zz := -z_max * 0.6 + k * 0.8
+					_fadd("metal", metal, Vector3(0.6, 1.3, 0.75), Vector3(x_max - 0.3, y + 0.65, zz))
+				_fsolid(root, Vector3(0.6, 1.3, 2.4), Vector3(x_max - 0.3, y + 0.65, -z_max * 0.6 + 0.8))
+			1:  # apartment: couch, coffee table, TV, bookshelf
+				var zz := back
+				_fadd("fabric", fabric, Vector3(2.4, 0.45, 0.95), Vector3(cx, y + 0.225, zz))
+				_fadd("fabric", fabric, Vector3(2.4, 0.55, 0.22), Vector3(cx, y + 0.72, zz - dz * 0.36))
+				_fadd("fabric", fabric, Vector3(0.22, 0.6, 0.95), Vector3(cx - 1.2, y + 0.4, zz))
+				_fadd("fabric", fabric, Vector3(0.22, 0.6, 0.95), Vector3(cx + 1.2, y + 0.4, zz))
+				_fsolid(root, Vector3(2.6, 0.9, 1.0), Vector3(cx, y + 0.45, zz))
+				_fadd("wood", wood, Vector3(1.2, 0.08, 0.6), Vector3(cx, y + 0.42, zz + dz * 1.4))
+				_fadd("wood", wood, Vector3(1.1, 0.38, 0.5), Vector3(cx, y + 0.19, zz + dz * 1.4))
+				_fadd("wood", wood, Vector3(1.8, 0.5, 0.45), Vector3(cx, y + 0.25, zz + dz * 3.4))
+				_fadd("black", black, Vector3(1.6, 0.9, 0.06), Vector3(cx, y + 1.0, zz + dz * 3.45))
+				_fsolid(root, Vector3(1.8, 0.5, 0.5), Vector3(cx, y + 0.25, zz + dz * 3.4))
+				_fadd("wood", wood, Vector3(0.4, 2.0, 1.8), Vector3(x_max - 0.2, y + 1.0, 0))
+				for sh in 4:
+					_fadd("black", black, Vector3(0.05, 0.04, 1.7), Vector3(x_max - 0.39, y + 0.3 + sh * 0.5, 0))
+				_fsolid(root, Vector3(0.4, 2.0, 1.8), Vector3(x_max - 0.2, y + 1.0, 0))
+			2:  # storage: stacks of crates and metal shelving
+				for k in 3:
+					var p := Vector3(_rng.randf_range(cx - 1.5, x_max - 0.7), y, _rng.randf_range(-z_max + 0.8, z_max - 0.8) * 0.5 + back * 0.5)
+					var stack := _rng.randi_range(1, 2)
+					for s in stack:
+						_fadd("crate", crate, Vector3(1.1, 1.0, 1.1), p + Vector3(0, 0.5 + s * 1.0, 0))
+					_fsolid(root, Vector3(1.1, stack * 1.0, 1.1), p + Vector3(0, stack * 0.5, 0))
+				for lvl in 4:
+					_fadd("metal", metal, Vector3(0.6, 0.04, 3.0), Vector3(x_max - 0.3, y + 0.3 + lvl * 0.55, -z_max * 0.4))
+				for zz in [-z_max * 0.4 - 1.45, -z_max * 0.4 + 1.45]:
+					_fadd("metal", metal, Vector3(0.6, 2.0, 0.05), Vector3(x_max - 0.3, y + 1.0, zz))
+				_fsolid(root, Vector3(0.6, 2.0, 3.0), Vector3(x_max - 0.3, y + 1.0, -z_max * 0.4))
+		# a supply chest on about half the floors
+		if _rng.randf() < 0.5:
+			var ch: StaticBody3D = chest_script.new()
+			ch.position = Vector3(x_max - 0.5, y, z_max * 0.55 * dz)
+			ch.rotation.y = -PI * 0.5
+			root.add_child(ch)
+	for key in _furn:
+		var mi := MeshInstance3D.new()
+		var st: SurfaceTool = _furn[key]
+		mi.mesh = st.commit()
+		mi.material_override = _furn_mats[key]
+		root.add_child(mi)
+	_furn.clear()

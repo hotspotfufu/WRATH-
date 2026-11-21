@@ -116,10 +116,7 @@ func _draw() -> void:
 
 	# top-centre: Thor's health
 	if boss and is_instance_valid(boss) and not bool(boss.get("dead")):
-		var frac := float(boss.get("hp")) / float(boss.get("max_hp"))
-		var r := Rect2(cx - 420, 70, 840, 26)
-		_text("THOR, GOD OF THUNDER", Vector2(cx, 58), 30, Color(0.75, 0.88, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
-		_bar(r, frac, Color(0.35, 0.65, 1.0).lerp(Color(0.95, 0.25, 0.25), 1.0 - frac), Color(0, 0, 0, 0.5), 10)
+		_draw_boss_bars(boss, cx)
 
 	if p and is_instance_valid(p) and not bool(p.get("dead")):
 		_draw_player(p, sz)
@@ -144,22 +141,71 @@ func _draw() -> void:
 		_text("Press ENTER or click to play again", Vector2(cx, sz.y * 0.4 + 140), 28, Color(0.8, 0.9, 1.0, 0.6 + 0.4 * sin(_time * 4.0)), HORIZONTAL_ALIGNMENT_CENTER)
 
 
+## stacked health bars: the bar underneath shows the colour of the next one
+const BAR_COLORS := [Color(1.0, 0.75, 0.2), Color(0.7, 0.35, 1.0), Color(0.3, 0.65, 1.0)]
+
+
+func _draw_boss_bars(boss: Node, cx: float) -> void:
+	var hp := float(boss.get("hp"))
+	var per := float(boss.get("BAR_HP"))
+	var left := int(boss.call("bars_left"))
+	var in_bar := hp - per * (left - 1)
+	var frac := clampf(in_bar / per, 0.0, 1.0)
+	var single := int(boss.get("BARS")) == 1
+	var r := Rect2(cx - 420, 72, 840, 26)
+	_text("THOR, GOD OF THUNDER", Vector2(cx, 58), 30, Color(0.75, 0.88, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
+	var top: Color = BAR_COLORS[clampi(left - 1, 0, 2)]
+	if single:
+		top = Color(0.35, 0.65, 1.0).lerp(Color(0.95, 0.2, 0.2), 1.0 - frac)
+	var under := Color(0, 0, 0, 0.5)
+	if left > 1:
+		under = (BAR_COLORS[left - 2] as Color).darkened(0.25)
+	if float(boss.get("_phase_shield")) > 0.0:
+		top = Color(0.85, 0.95, 1.0, 0.6 + 0.4 * sin(_time * 18.0))
+	_bar(r, frac, top, under, 10)
+	if single:
+		_text("%d%%" % int(ceil(frac * 100.0)), Vector2(cx + 435, 94), 26, top)
+		return
+	# pips: how many bars are left
+	for i in 3:
+		var pc := Vector2(cx + 450 + i * 26, 85)
+		var on := i < left
+		_c.draw_circle(pc, 9.0, (BAR_COLORS[i] as Color) if on else Color(0.2, 0.2, 0.25, 0.7))
+		_c.draw_arc(pc, 9.0, 0, TAU, 16, Color(1, 1, 1, 0.6), 2.0)
+	_text("x%d" % left, Vector2(cx - 440, 94), 30, top, HORIZONTAL_ALIGNMENT_RIGHT)
+
+
 func _draw_player(p: Node, sz: Vector2) -> void:
 	var cx := sz.x * 0.5
-	# shield (big, blue) and health (thin, red) at the top, Halo style
+	# ARMOR (blue) on top, HEALTH (red) underneath. Neither one regenerates.
 	var shield := float(p.get("shield"))
 	var max_shield := float(p.get("max_shield"))
 	var health := float(p.get("health"))
-	var sr := Rect2(cx - 300, sz.y - 120, 600, 22)
-	var low := shield < 1.0
-	_bar(sr, shield / max_shield, Color(0.35, 0.75, 1.0) if not low else Color(0.9, 0.2, 0.2, 0.5 + 0.5 * sin(_time * 12.0)), Color(0, 0, 0, 0.5), 10)
-	_bar(Rect2(cx - 300, sz.y - 88, 600, 10), health / 100.0, Color(0.9, 0.25, 0.25))
-	if max_shield > 100.0:
-		_text("ARMOR", Vector2(cx + 310, sz.y - 102), 20, Color(0.5, 0.8, 1.0))
+	var sr := Rect2(cx - 300, sz.y - 128, 600, 20)
+	_bar(sr, shield / max_shield, Color(0.35, 0.75, 1.0), Color(0, 0, 0, 0.5), 10)
+	_text("ARMOR  %d" % int(shield), Vector2(cx - 300, sz.y - 134), 20, Color(0.6, 0.85, 1.0))
+	var low := health < 35.0
+	var hcol := Color(0.9, 0.25, 0.25) if not low else Color(1.0, 0.2, 0.2, 0.55 + 0.45 * sin(_time * 10.0))
+	_bar(Rect2(cx - 300, sz.y - 94, 600, 16), health / float(p.get("max_health")), hcol, Color(0, 0, 0, 0.5), 10)
+	_text("HEALTH  %d" % int(health), Vector2(cx + 300, sz.y - 54), 20, Color(1.0, 0.6, 0.6), HORIZONTAL_ALIGNMENT_RIGHT)
+	if shield < 1.0:
+		_text("ARMOR BROKEN - find armor (health recovers if you take cover)" if not low else "LOW HEALTH - take cover or grab a health pack!", Vector2(cx, sz.y - 165), 24, hcol if low else Color(0.6, 0.85, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
 
 	var in_v: Node = p.get("in_vehicle")
 	if in_v:
-		_text("JEEP  -  W/S drive  A/D steer  SPACE brake  E get out", Vector2(cx, sz.y - 150), 24, Color(1, 1, 1, 0.9), HORIZONTAL_ALIGNMENT_CENTER)
+		var names := {"jeep": "JEEP", "mrap": "ARMORED TRUCK", "apc": "8-WHEEL APC"}
+		var vname: String = names.get(String(in_v.get("kind")), "VEHICLE")
+		var extra := "   LEFT CLICK fire roof gun" if bool(in_v.get("has_turret")) else ""
+		_text(vname + "  -  W/S drive  A/D steer  SPACE brake  E get out" + extra, Vector2(cx, sz.y - 150), 24, Color(1, 1, 1, 0.9), HORIZONTAL_ALIGNMENT_CENTER)
+		if bool(in_v.get("has_turret")):
+			var cc := Vector2(cx, sz.y * 0.5)
+			_c.draw_arc(cc, 20, 0, TAU, 32, Color(1.0, 0.7, 0.3, 0.9), 2.5)
+			for i in 4:
+				var dd := Vector2.from_angle(TAU * i / 4.0)
+				_c.draw_line(cc + dd * 24, cc + dd * 36, Color(1.0, 0.7, 0.3, 0.9), 2.5)
+		var vh := float(in_v.get("health"))
+		var vmax := float((in_v.get("SPECS") as Dictionary)[String(in_v.get("kind"))]["health"])
+		_bar(Rect2(cx - 300, sz.y - 190, 600, 10), vh / vmax, Color(1.0, 0.7, 0.3))
 		return
 
 	# crosshair
@@ -230,7 +276,9 @@ func _draw_player(p: Node, sz: Vector2) -> void:
 	var prompt := ""
 	for v in get_tree().get_nodes_in_group("vehicles"):
 		if (v as Node3D).global_position.distance_to((p as Node3D).global_position) < 3.6 and v.call("free_seat"):
-			prompt = "[E]  Drive JEEP"
+			prompt = "[E]  Drive " + {"jeep": "JEEP", "mrap": "ARMORED TRUCK", "apc": "8-WHEEL APC"}.get(String(v.get("kind")), "VEHICLE")
+	if prompt == "" and p.call("nearest_chest"):
+		prompt = "[E]  Open supply chest"
 	if prompt == "":
 		var item: Node = p.call("nearest_pickup")
 		if item and String(item.get("kind")) == "weapon":
@@ -269,7 +317,7 @@ func _draw_start(sz: Vector2) -> void:
 	var cx := sz.x * 0.5
 	_c.draw_rect(Rect2(Vector2.ZERO, sz), Color(0.02, 0.04, 0.08, 0.72))
 	_text("GOD HUNT", Vector2(cx, sz.y * 0.24), 120, Color(1.0, 0.85, 0.45), HORIZONTAL_ALIGNMENT_CENTER)
-	_text("100 soldiers.  2:30 to gear up.  Then THOR falls from the sky.", Vector2(cx, sz.y * 0.24 + 70), 34, Color(0.85, 0.9, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
+	_text("25 soldiers.  1:30 to gear up.  Then THOR falls from the sky.", Vector2(cx, sz.y * 0.24 + 70), 34, Color(0.85, 0.9, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
 	var lines := [
 		"WASD  move        SHIFT  sprint        SPACE  jump        C  crouch",
 		"MOUSE  look        LEFT CLICK  fire        RIGHT CLICK  aim",
