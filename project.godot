@@ -6,7 +6,7 @@ config_version=5
 [application]
 
 config/name="GOD HUNT"
-config/description="25 soldiers. 90 seconds to gear up. Then a god falls from the sky."
+config/description="100 soldiers. 90 seconds to gear up. Then a god falls from the sky."
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 
