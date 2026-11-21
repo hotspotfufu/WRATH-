@@ -408,7 +408,7 @@ func _new_building(c: Vector3, footprint: Vector2, height: float) -> Dictionary:
 
 
 func _tower(c: Vector3, fp: Vector2, h: float, door_side: int = 0) -> void:
-	if Models.has_ruins():
+	if USE_RUINS and Models.has_ruins():
 		_ruin(c, fp, door_side)
 		return
 	var b := _new_building(c, fp, h)
@@ -439,6 +439,7 @@ func _tower(c: Vector3, fp: Vector2, h: float, door_side: int = 0) -> void:
 
 ## one of the bought ruined apartment blocks, scaled up to fill the lot.
 ## Its broken floors are real collision, so you can climb into the open storeys.
+const USE_RUINS := false       # the bought ruined blocks are switched off (rubble piles still used)
 var _ruin_order: Array = []
 func _ruin(c: Vector3, fp: Vector2, door_side: int) -> void:
 	if _ruin_order.is_empty():

@@ -40,8 +40,8 @@ var _bob := 0.0
 var _crouch := 0.0
 var _since_hit := 10.0
 var _thor_safe := 0.0
-const THOR_HIT := 55.0          ## one Thor hit (after your armor is gone) takes 55 of 100 health
-const REGEN_DELAY := 5.0        ## health starts coming back 5 s after your last hit
+const THOR_HITS := 3            ## Thor needs 3 hits to break full armor, then 3 more to kill you
+const REGEN_DELAY := 8.0        ## health starts coming back 8 s after your last hit (armor never does)
 const REGEN_RATE := 10.0        ## health per second
 var _swap_t := 0.0
 var _throwing := false
@@ -500,16 +500,18 @@ func take_damage(amount: float, from: Node) -> void:
 			return               # the vehicle's armor takes Thor's hit for you
 		amount *= 0.3
 	if from_thor:
-		# Thor's hits: 1st hit breaks your armor, 2nd hurts you badly, 3rd kills.
+		# Thor's hits: 3 hits strip full armor (a third each), then 3 hits take your
+		# health (a third each). A hit on your last bit of armor is fully blocked.
 		# A short safety window stops one attack from counting as several hits.
 		if _thor_safe > 0.0:
 			return
 		_thor_safe = 1.2
 		_since_hit = 0.0
-		if shield > 0.0:
-			shield = 0.0
+		if shield > 0.5:
+			shield = maxf(0.0, shield - max_shield / THOR_HITS - 0.01)
 		else:
-			health -= THOR_HIT
+			shield = 0.0
+			health -= max_health / THOR_HITS + 0.01
 		if _hud:
 			_hud.call("damage_flash", from)
 		if health <= 0.0:

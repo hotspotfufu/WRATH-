@@ -285,7 +285,7 @@ func _fight(boss: Node3D) -> void:
 			if col == boss or (col and col.get_parent() == boss):
 				var accuracy := 0.55 if dist > 40.0 else 0.8
 				if randf() < accuracy:
-					boss.call("take_damage", float(d["damage"]) * float(d["pellets"]) * 1.6, self)   # 25 soldiers hit as hard as 100 used to
+					boss.call("take_damage", float(d["damage"]) * float(d["pellets"]) * 0.32, self)
 		var cam := get_viewport().get_camera_3d()
 		if cam and cam.global_position.distance_to(global_position) < 70.0:
 			FX.tracer(get_parent(), _gun.global_position, end, Color(1.0, 0.85, 0.5), 0.04)

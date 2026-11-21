@@ -35,6 +35,8 @@ var _sk: Skeleton3D
 var _near: Array[MeshInstance3D] = []
 var _far: Array[MeshInstance3D] = []
 var _is_near := true
+var _tiny: Array[MeshInstance3D] = []     # far parts hidden beyond 50 m (boots, packs)
+var _very_far := false
 var _lod_t := 0.0
 var _gun: Node3D
 var _muzzle: Node3D
@@ -106,6 +108,8 @@ func _dress() -> void:
 			_near.append(mi)
 		else:
 			_far.append(mi)
+			if part == "Shoes_Low" or part == "Backpack2":
+				_tiny.append(mi)
 	_set_lod(true)
 
 
@@ -238,8 +242,15 @@ func animate(delta: float, speed: float) -> void:
 			var want_near := d < NEAR_DIST
 			if want_near != _is_near:
 				_set_lod(want_near)
+			var vf := d > 50.0
+			if vf != _very_far or want_near:
+				_very_far = vf
+				for mi in _tiny:
+					mi.visible = not want_near and not vf
+			if _gun:
+				_gun.visible = d < 60.0       # a gun past 60 m is about a pixel wide
 			# far away soldiers don't need every frame of animation
-			_skip = 0 if d < 40.0 else (1 if d < 90.0 else 3)
+			_skip = 0 if d < 30.0 else (2 if d < 70.0 else (4 if d < 140.0 else 8))
 	_phase += delta * (2.4 + speed * 1.25)
 	_kick = maxf(0.0, _kick - delta * 9.0)
 	_raise = move_toward(_raise, 1.0 if aiming else 0.0, delta * 3.0)

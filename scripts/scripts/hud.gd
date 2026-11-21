@@ -317,7 +317,7 @@ func _draw_start(sz: Vector2) -> void:
 	var cx := sz.x * 0.5
 	_c.draw_rect(Rect2(Vector2.ZERO, sz), Color(0.02, 0.04, 0.08, 0.72))
 	_text("GOD HUNT", Vector2(cx, sz.y * 0.24), 120, Color(1.0, 0.85, 0.45), HORIZONTAL_ALIGNMENT_CENTER)
-	_text("25 soldiers.  1:30 to gear up.  Then THOR falls from the sky.", Vector2(cx, sz.y * 0.24 + 70), 34, Color(0.85, 0.9, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
+	_text("100 soldiers.  1:30 to gear up.  Then THOR falls from the sky.", Vector2(cx, sz.y * 0.24 + 70), 34, Color(0.85, 0.9, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
 	var lines := [
 		"WASD  move        SHIFT  sprint        SPACE  jump        C  crouch",
 		"MOUSE  look        LEFT CLICK  fire        RIGHT CLICK  aim",

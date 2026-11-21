@@ -1,13 +1,13 @@
 extends Node3D
 ## Runs a match of GOD HUNT:
-##   1. LOOT (1:30) - 25 soldiers drop into the city and grab weapons, armor, jeeps
+##   1. LOOT (1:30) - 100 soldiers drop into the city and grab weapons, armor, jeeps
 ##   2. STORM - the sky darkens, thunder rolls
 ##   3. BOSS - Thor crashes down and tries to wipe everyone out
 ##   4. Kill Thor -> his hammer drops. Pick it up to claim Mjolnir.
 
 const CityScript := preload("res://scripts/city.gd")
 const LOOT_TIME := 90.0
-const SOLDIERS := 24            # plus you = 25 (fewer, but far more detailed soldiers)
+const SOLDIERS := 99            # plus you = 100
 const MAX_JEEPS := 10
 
 var phase := "start"
