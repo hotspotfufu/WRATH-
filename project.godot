@@ -6,7 +6,7 @@ config_version=5
 [application]
 
 config/name="GOD HUNT"
-config/description="100 soldiers. 3 minutes to gear up. Then a god falls from the sky."
+config/description="25 soldiers. 90 seconds to gear up. Then a god falls from the sky."
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 
@@ -41,3 +41,12 @@ renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
 environment/defaults/default_clear_color=Color(0.55, 0.7, 0.85, 1)
 anti_aliasing/quality/msaa_3d=1
+mesh_lod/lod_change/threshold_pixels=4.0
+
+[importer_defaults]
+
+texture={
+"compress/lossy_quality": 0.85,
+"compress/mode": 1,
+"mipmaps/generate": true
+}
